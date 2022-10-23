@@ -7,6 +7,7 @@
 本仓库记录了一些智能推荐技术的基础算法：
 
 ### 自学+实现
+
 1. Average Filling
 2. Memory-Based Collaborative Filtering
 3. Matrix Factorization
@@ -20,8 +21,8 @@
 11. Collaborative Denoising Auto-Encoders
 12. Variational Auto-Encoders (VAE)
 
-
 ### 自学+理解:
+
 1. element-wise Alternative Least Squares (eALS)
 2. View-enhanced eALS (VALS)
 3. Factorizing Personalized Markov Chains
@@ -30,4 +31,5 @@
 6. Self-Attentive Sequential Recommendation
 
 ## 参考资料
+
 [Recommendation System](https://csse.szu.edu.cn/staff/panwk/recommendation/)
