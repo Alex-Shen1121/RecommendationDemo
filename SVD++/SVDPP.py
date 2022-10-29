@@ -92,7 +92,7 @@ class SVDPP:
             rating=test_data[i,2]
             eui=rating-self.predict(uid, iid)
             mae+=math.fabs(eui)
-        print('mae of test data is',mae/self.mat.shape[0])
+        print('mae of test data is',mae/test_data.shape[0])
     
     
 def getMLData(): #获取训练集和测试集的函数
