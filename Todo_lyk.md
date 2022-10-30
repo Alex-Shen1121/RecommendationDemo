@@ -1,0 +1,13 @@
+# TODO
+- [ ] Average Filling
+- [ ] Memory-Based Collaborative Filtering
+- [ ] Matrix Factorization
+- [ ] SVD++
+- [ ] Matrix Factorization with Multiclass Preference Context
+- [ ] Ranking-Oriented Evaluation Metrics
+- [ ] Memory-Based One-Class Collaborative Filtering
+- [ ] Bayesian Personalized Ranking
+- [ ] Factored Item Similarity Models with RMSE Loss
+- [ ] Matrix Factorization with Logistic Loss
+- [ ] Collaborative Denoising Auto-Encoders
+- [ ] Variational Auto-Encoders (VAE)
