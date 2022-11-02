@@ -8,20 +8,18 @@ class MF_MPC:
     def __init__(self):
         self.d = 20  # 潜在特征向量的维度
         self.num_rating_types = 10  # 评分类型数 0.5/1/.../5
-        # todo
-        self.flagGraded = True
-        # todo
-        self.alpha_u = 0.01
-        self.alpha_v = 0.01
-        self.alpha_g = 0.01
 
-        # todo
-        self.beta_u = 0.01
-        self.beta_v = 0.01
+        self.flagGraded = True  # 是否使用分级评分
 
-        # 学习率
-        self.gamma = 0.01
-        self.gamma_decay = 0.9
+        self.alpha_u = 0.01  # 用户偏置项的学习率
+        self.alpha_v = 0.01  # 物品偏置项的学习率
+        self.alpha_g = 0.01  # 分级评分的学习率
+
+        self.beta_u = 0.01  # 用户偏置项的正则化参数
+        self.beta_v = 0.01  # 物品偏置项的正则化参数
+
+        self.gamma = 0.01  # 学习率
+        self.gamma_decay = 0.9  # 学习率衰减率
 
         # 文件路径
         self.fnTrainData = "../datasets/ml-100k/u2.base"
@@ -31,43 +29,46 @@ class MF_MPC:
         self.m = 1682  # 物品数量
         self.num_train = 0  # 训练条数
 
-        self.num_test = 0
+        self.num_test = 0  # 测试条数
 
         self.MinRating = 0.5  # 评分最小值（ML10M：0.5，Netflix：1）
         self.MaxRating = 5  # 评分最大值
 
         self.num_iterations = 100  # 迭代次数
 
-        self.Train_ExplicitFeedbacksGraded = {}
+        # {userID:{g1:[itemID1,itemID2,...],g2:[itemID1,itemID2,...],...}}
+        self.Train_ExplicitFeedbacksGraded = {}  # 训练集中每个用户的分级评分
 
         # === 训练数据
-        self.indexUserTrain = None
-        self.indexItemTrain = None
-        self.ratingTrain = None
+        self.indexUserTrain = None  # 第i条训练数据的用户ID
+        self.indexItemTrain = None  # 第i条训练数据的物品ID
+        self.ratingTrain = None  # 第i条训练数据的评分
 
         # === 测试数据
-        self.ratingTest = None
-        self.indexItemTest = None
-        self.indexUserTest = None
+        self.ratingTest = None  # 第i条测试数据的评分
+        self.indexItemTest = None  # 第i条测试数据的物品ID
+        self.indexUserTest = None  # 第i条测试数据的用户ID
 
         # === 一些统计量
-        self.userRatingSumTrain = np.zeros(self.n + 1)
-        self.itemRatingSumTrain = np.zeros(self.m + 1)
-        self.userRatingNumTrain = np.zeros(self.n + 1)
-        self.itemRatingNumTrain = np.zeros(self.m + 1)
+        self.userRatingSumTrain = np.zeros(self.n + 1)  # 用户评分总和
+        self.itemRatingSumTrain = np.zeros(self.m + 1)  # 物品评分总和
+        self.userRatingNumTrain = np.zeros(self.n + 1)  # 用户评分数量
+        self.itemRatingNumTrain = np.zeros(self.m + 1)  # 物品评分数量
 
+        # 用户评分计数 user_graded_rating_number[i][j] 用户i对分级评分j的评分数量
         self.user_graded_rating_number = np.zeros([self.n + 1, self.num_rating_types + 1])
 
         # === 模型参数
-        self.U = np.zeros([self.n + 1, self.d])
-        self.V = np.zeros([self.m + 1, self.d])
+        self.U = np.zeros([self.n + 1, self.d])  # 用户潜在特征向量
+        self.V = np.zeros([self.m + 1, self.d])  # 物品潜在特征向量
 
+        # G[i][j]表示物品i的第j个分级评分的潜在特征向量
         self.G = np.zeros([self.m + 1, self.num_rating_types + 1, self.d])  # 关于评分为r的物品i'的潜在特征向量
 
         self.g_avg = 0  # 全局平均得分
 
-        self.biasU = np.zeros(self.n + 1)
-        self.biasV = np.zeros(self.m + 1)
+        self.biasU = np.zeros(self.n + 1)  # 用户偏置项
+        self.biasV = np.zeros(self.m + 1)  # 物品偏置项
 
     def readData(self):
         print("-------------- Reading data... --------------")
@@ -105,6 +106,7 @@ class MF_MPC:
             ratingSum += rating
 
             if self.flagGraded:
+                # 处理0.5的情况 转换为整数
                 g = int(rating * 2)
                 if self.Train_ExplicitFeedbacksGraded.get(userID) is not None:
                     g2itemSet = self.Train_ExplicitFeedbacksGraded[userID]
@@ -149,21 +151,22 @@ class MF_MPC:
     def initializeModel(self):
         # === initialization of U, V, P, N, G
         print("-------------- Initializing model... --------------")
+        # 初始化 用户和物品的潜在特征向量
         self.U = (np.random.rand(self.n + 1, self.d) - 0.5) * 0.01
-        self.U[0] = np.zeros(self.d)
         self.V = (np.random.rand(self.m + 1, self.d) - 0.5) * 0.01
-        self.V[0] = np.zeros(self.d)
 
+        # 初始化 物品评分为r的潜在特征向量
         if self.flagGraded:
             self.G = (np.random.rand(self.m + 1, self.num_rating_types + 1, self.d) - 0.5) * 0.01
-            self.G[0] = np.zeros([self.num_rating_types + 1, self.d])
 
+        # 初始化 用户偏置项
         self.biasU = np.zeros(self.n + 1)
         for u in range(1, self.n + 1):
             if self.userRatingNumTrain[u] > 0:
                 self.biasU[u] = (self.userRatingSumTrain[u] - self.g_avg * self.userRatingNumTrain[u]) \
                                 / self.userRatingNumTrain[u]
 
+        # 初始化 物品偏置项
         self.biasV = np.zeros(self.m + 1)
         for i in range(1, self.m + 1):
             if self.itemRatingNumTrain[i] > 0:
@@ -178,12 +181,13 @@ class MF_MPC:
 
             # === training
             for iter_rand in range(self.num_train):
-                # === randomly sample a training instance
+                # 随机取一个训练样本
                 rand_case = np.random.randint(0, self.num_train)
                 userID = int(self.indexUserTrain[rand_case])
                 itemID = int(self.indexItemTrain[rand_case])
                 rating = self.ratingTrain[rand_case]
 
+                # 初始化梯度
                 tilde_Uu_g = np.zeros(self.d)
                 tilde_Uu = np.zeros(self.d)
 
@@ -217,7 +221,7 @@ class MF_MPC:
                        + np.dot(tilde_Uu, self.V[itemID])
                 err = rating - pred
 
-                # === 更新参数
+                # === 更新梯度
                 self.g_avg -= self.gamma * (-err)
                 self.biasU[userID] -= self.gamma * (-err - self.beta_u * self.biasU[userID])
                 self.biasV[itemID] -= self.gamma * (-err - self.beta_v * self.biasV[itemID])
@@ -225,6 +229,7 @@ class MF_MPC:
                 V_before_update = np.zeros(self.d)
                 U_before_update = np.zeros(self.d)
 
+                # 更新参数
                 for f in range(self.d):
                     V_before_update[f] = self.V[itemID][f]
                     U_before_update[f] = self.U[userID][f]
@@ -261,6 +266,7 @@ class MF_MPC:
         mae, rmse = 0, 0
 
         tilde_Uu_g = np.zeros(self.d)
+        # tilde_Uu[i][j] 表示用户i的第j个隐式反馈的隐式偏好向量
         tilde_Uu = np.zeros([self.n + 1, self.d])
 
         for userID in range(1, self.n + 1):
