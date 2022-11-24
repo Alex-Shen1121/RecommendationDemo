@@ -1,164 +1,149 @@
-import numpy as np
-import pandas as pd
-from collections import defaultdict
 import random
-import tensorflow as tf
+from collections import defaultdict
+import numpy as np
+from sklearn.metrics import roc_auc_score
+import score
+from tqdm import tqdm
 
 
-def gen_test(user_ratings):
-    """
-    对每一个用户u，在user_ratings中随机找到他评分过的一部电影i,保存在user_ratings_test，
-    后面构造训练集和测试集需要用到。
-    """
-    user_test = dict()
-    for u, i_list in user_ratings.items():
-        user_test[u] = random.sample(user_ratings[u], 1)[0]
-    return user_test
+class BPR:
+    # 用户数
+    user_count = 943
+    # 项目数
+    item_count = 1682
+    # k个主题,k数
+    latent_factors = 20
+    # 步长α
+    lr = 0.01
+    # 参数λ
+    reg = 0.01
+    # 训练次数
+    train_count = 500
+    # 训练集
+    train_data_path = '../datasets/ml-100k/u1.base.OCCF'
+    # 测试集
+    test_data_path = '../datasets/ml-100k/u1.test.OCCF'
+    # U-I的大小
+    size_u_i = user_count * item_count
+    # 随机设定的U，V矩阵(即公式中的Wuk和Hik)矩阵
+    U = None  # 大小无所谓
+    V = None
+    biasV = None
+
+    # 生成一个用户数*项目数大小的全0矩阵
+    test_data = np.zeros((user_count, item_count))
+    # 生成一个一维的全0矩阵
+    test = np.zeros(size_u_i)
+    # 再生成一个一维的全0矩阵
+    predict_ = np.zeros(size_u_i)
+
+    # 获取U-I数据对应
+    def load_data(self, path):
+        user_ratings = defaultdict(set)
+        linecnt = 0
+        with open(path, 'r') as f:
+            for line in f.readlines():
+                linecnt += 1
+                u, i, _, _ = line.split("\t")
+                u = int(u)
+                i = int(i)
+                user_ratings[u].add(i)
+        return user_ratings, linecnt
+
+    # 获取测试集的评分矩阵
+    def load_test_data(self, path):
+        file = open(path, 'r')
+        for line in file:
+            line = line.split('\t')
+            user = int(line[0])
+            item = int(line[1])
+            self.test_data[user - 1][item - 1] = 1
+
+    def train(self, user_ratings_train):
+        all_pairs = [(k, val) for k, v in user_ratings_train.items() for val in v]
+        for user in range(self.user_count):
+            # # 随机获取一个用户
+            # u = random.randint(1, self.user_count)
+            # # 训练集和测试集的用于不是全都一样的,比如train有948,而test最大为943
+            # if u not in user_ratings_train.keys():
+            #     continue
+            # # 从用户的U-I中随机选取1个Item
+            # i = random.sample(user_ratings_train[u], 1)[0]
+            (u, i) = random.choice(all_pairs)
+            # 随机选取一个用户u没有评分的项目
+            j = random.randint(1, self.item_count)
+            while j in user_ratings_train[u]:
+                j = random.randint(1, self.item_count)
+            # python中的取值从0开始
+            u = u - 1
+            i = i - 1
+            j = j - 1
+            # BPR
+            r_ui = np.dot(self.U[u], self.V[i].T) + self.biasV[i]
+            r_uj = np.dot(self.U[u], self.V[j].T) + self.biasV[j]
+            r_uij = r_ui - r_uj
+            loss_func = -1.0 / (1 + np.exp(r_uij))
+            # 更新2个矩阵
+            self.U[u] += -self.lr * (loss_func * (self.V[i] - self.V[j]) + self.reg * self.U[u])
+            self.V[i] += -self.lr * (loss_func * self.U[u] + self.reg * self.V[i])
+            self.V[j] += -self.lr * (loss_func * (-self.U[u]) + self.reg * self.V[j])
+            # 更新偏置项
+            self.biasV[i] += -self.lr * (loss_func + self.reg * self.biasV[i])
+            self.biasV[j] += -self.lr * (-loss_func + self.reg * self.biasV[j])
+
+    def predict(self, user, item):
+        predict = np.mat(user) * np.mat(item.T)
+        return predict
+
+    # 主函数
+    def main(self):
+        # 获取U-I的{1:{2,5,1,2}....}数据
+        user_ratings_train, all = self.load_data(self.train_data_path)
+        # 获取测试集的评分矩阵
+        self.load_test_data(self.test_data_path)
+
+        # 初始化参数
+        # 随机设定的U，V矩阵(即公式中的Wuk和Hik)矩阵
+        self.U = (np.random.rand(self.user_count, self.latent_factors) - 0.5) * 0.01  # 大小无所谓
+        self.V = (np.random.rand(self.item_count, self.latent_factors) - 0.5) * 0.01
+        self.biasV = np.zeros(self.item_count)
+        mu = all / (self.user_count * self.item_count)
+        for i in range(self.item_count):
+            y = 0
+            for j in user_ratings_train.values():
+                if i in j:
+                    y += 1
+            self.biasV[i] = y / self.user_count - mu
+
+        # 将test_data矩阵拍平
+        for u in range(self.user_count):
+            for item in range(self.item_count):
+                if int(self.test_data[u][item]) == 1:
+                    self.test[u * self.item_count + item] = 1
+                else:
+                    self.test[u * self.item_count + item] = 0
+        # 训练
+        for i in tqdm(range(self.train_count)):
+            self.train(user_ratings_train)  # 训练1000次完成
+        predict_matrix = self.predict(self.U, self.V)  # 将训练完成的矩阵內积
+        # 预测
+        self.predict_ = predict_matrix.getA().reshape(-1)  # .getA()将自身矩阵变量转化为ndarray类型的变量
+        self.predict_ = pre_handel(user_ratings_train, self.predict_, self.item_count)
+        auc_score = roc_auc_score(self.test, self.predict_)
+        print('AUC:', auc_score)
+        # Top-K evaluation
+        score.topK_scores(self.test, self.predict_, 5, self.user_count, self.item_count)
 
 
-def gen_train_batch(user_ratings, user_ratings_test, item_list, batch_size=512):
-    """
-    构造训练用的三元组
-    对于随机抽出的用户u，i可以从user_ratings随机抽出，而j也是从总的电影集中随机抽出，当然j必须保证(u,j)不在user_ratings中
-    """
-    t = []
-    for b in range(batch_size):
-        u = random.sample(user_ratings.keys(), 1)[0]
-        i = random.sample(user_ratings[u], 1)[0]
-        while i == user_ratings_test[u]:
-            i = random.sample(user_ratings[u], 1)[0]
-
-        j = random.sample(item_list, 1)[0]
-        while j in user_ratings[u]:
-            j = random.sample(item_list, 1)[0]
-        t.append([u, i, j])
-    return np.asarray(t)
+def pre_handel(set, predict, item_count):
+    # Ensure the recommendation cannot be positive items in the training set.
+    for u in set.keys():
+        for j in set[u]:
+            predict[(u - 1) * item_count + j - 1] = 0
+    return predict
 
 
-def gen_test_batch(user_ratings, user_ratings_test, item_list):
-    """
-    对于每个用户u，它的评分电影i是我们在user_ratings_test中随机抽取的，它的j是用户u所有没有评分过的电影集合，
-    比如用户u有1000部电影没有评分，那么这里该用户的测试集样本就有1000个
-    """
-    for u in user_ratings.keys():
-        t = []
-        i = user_ratings_test[u]
-        for j in item_list:
-            if not (j in user_ratings[u]):
-                t.append([u, i, j])
-        yield np.asarray(t)
-
-
-def bpr_mf(user_count, item_count, hidden_dim):
-    """
-    hidden_dim为矩阵分解的隐含维度k。user_emb_w对应矩阵W, item_emb_w对应矩阵H
-    """
-    u = tf.compat.v1.placeholder(tf.int32, [None])
-    i = tf.compat.v1.placeholder(tf.int32, [None])
-    j = tf.compat.v1.placeholder(tf.int32, [None])
-
-    user_emb_w = tf.compat.v1.get_variable("user_emb_w", [user_count + 1, hidden_dim],
-                                 initializer=tf.random_normal_initializer(0, 0.1))
-    item_emb_w = tf.compat.v1.get_variable("item_emb_w", [item_count + 1, hidden_dim],
-                                 initializer=tf.random_normal_initializer(0, 0.1))
-
-    u_emb = tf.nn.embedding_lookup(user_emb_w, u)
-    i_emb = tf.nn.embedding_lookup(item_emb_w, i)
-    j_emb = tf.nn.embedding_lookup(item_emb_w, j)
-
-    # MF predict: u_i > u_j
-    # 第一部分的i 和 j的差值计算
-    x = tf.compat.v1.reduce_sum(tf.multiply(u_emb, (i_emb - j_emb)), 1, keep_dims=True)
-
-    # AUC for one user:
-    # reasonable iff all (u,i,j) pairs are from the same user
-    # average AUC = mean( auc for each user in test set)
-    mf_auc = tf.reduce_mean(tf.compat.v1.to_float(x > 0))
-
-    # 第二部分的正则项
-    l2_norm = tf.add_n([
-        tf.reduce_sum(tf.multiply(u_emb, u_emb)),
-        tf.reduce_sum(tf.multiply(i_emb, i_emb)),
-        tf.reduce_sum(tf.multiply(j_emb, j_emb))
-    ])
-
-    # 整个loss
-    regulation_rate = 0.0001
-    bprloss = regulation_rate * l2_norm - tf.reduce_mean(tf.compat.v1.log(tf.sigmoid(x)))
-
-    # 梯度上升
-    train_op = tf.compat.v1.train.GradientDescentOptimizer(0.01).minimize(bprloss)
-    return u, i, j, mf_auc, bprloss, train_op
-
-
-if __name__ == "__main__":
-    df = pd.read_csv("../datasets/ml-100k/u.data", sep='\t', header=None, names=['user_id', 'item_id', 'rating', 'timestamp'])
-    user_list = df['user_id'].unique().tolist()
-    item_list = df['item_id'].unique().tolist()
-    user_count = len(user_list)
-    item_count = len(item_list)
-    # print(user_count, item_count)
-
-    user_ratings = defaultdict(set)
-    for index, row in df.iterrows():
-        u = row['user_id']
-        i = row['item_id']
-        user_ratings[u].add(i)
-
-    user_ratings_test = gen_test(user_ratings)
-
-    with tf.compat.v1.Session() as sess:
-        """
-        这里k取了20， 迭代次数3， 主要是为了快速输出结果。
-        如果要做一个较好的BPR算法，需要对k值进行选择迭代，并且迭代次数也要更多一些。
-        """
-        u, i, j, mf_auc, bprloss, train_op = bpr_mf(user_count, item_count, 20)
-        sess.run(tf.compat.v1.global_variables_initializer())
-
-        for epoch in range(1, 4):
-            _batch_bprloss = 0
-            for k in range(1, 5000): # uniform samples from training set
-                uij = gen_train_batch(user_ratings, user_ratings_test, item_list)
-                _bprloss, _train_op = sess.run([bprloss, train_op],
-                                               feed_dict={u: uij[:, 0], i: uij[:, 1], j: uij[:, 2]})
-
-                _batch_bprloss += _bprloss
-
-            print("epoch:", epoch)
-            print("bprloss:", _batch_bprloss / k)
-            print("_train_op")
-
-            user_count = 0
-            _auc_sum = 0.0
-
-            for t_uij in gen_test_batch(user_ratings, user_ratings_test, item_list):
-                _auc, _test_bprloss = sess.run([mf_auc, bprloss],
-                                               feed_dict={u: t_uij[:, 0], i: t_uij[:, 1], j: t_uij[:, 2]}
-                                               )
-                user_count += 1
-                _auc_sum += _auc
-            print("test_loss: ", _test_bprloss, "test_auc: ", _auc_sum / user_count)
-            print("")
-        variable_names = [v.name for v in tf.compat.v1.trainable_variables()]
-        values = sess.run(variable_names)
-        for k, v in zip(variable_names, values):
-            print("Variable: ", k)
-            print("Shape: ", v.shape)
-            print(v)
-
-    """
-    现在已经得到了W,H矩阵，就可以对任意一个用户u的评分排序了。注意输出的W,H矩阵分别在values[0]和values[1]中。
-    """
-    # 0号用户对这个用户对所有电影的预测评分
-    session1 = tf.compat.v1.Session()
-    u1_dim = tf.expand_dims(values[0][0], 0)
-    u1_all = tf.matmul(u1_dim, values[1], transpose_b=True)
-    result_1 = session1.run(u1_all)
-    print(result_1)
-
-    print("以下是给用户0的推荐：")
-    p = np.squeeze(result_1)
-    p[np.argsort(p)[:-5]] = 0
-    for index in range(len(p)):
-        if p[index] != 0:
-            print(index, p[index])
+if __name__ == '__main__':
+    # 调用类的主函数
+    bpr = BPR()
+    bpr.main()
