@@ -122,6 +122,7 @@ class BPR:
                     self.test[u * self.item_count + item] = 1
                 else:
                     self.test[u * self.item_count + item] = 0
+
         # 训练
         for i in tqdm(range(self.train_count)):
             self.train(user_ratings_train)  # 训练1000次完成
